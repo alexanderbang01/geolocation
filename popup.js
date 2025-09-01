@@ -351,7 +351,7 @@ function wire() {
           chrome.storage.local.set({ lastGeoMeta: record }, () => {
             loadLast();
             setStatus(
-              record.ok ? "OK" : "Unknown format",
+              record.ok ? "OK" : "Ukendt format",
               record.ok ? "#22c55e" : "#f59e0b"
             );
           });
