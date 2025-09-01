@@ -1,46 +1,48 @@
-(function () {
-    try {
-        const script = document.createElement("script");
-        script.src = chrome.runtime.getURL("injected.js");
-        script.async = false;
-        (document.documentElement || document.head || document.body).appendChild(script);
-        script.parentNode && script.parentNode.removeChild(script);
-    } catch (e) {
-        console.warn("Kunne ikke injicere injected.js", e);
+let requests = [];
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "getMetadataRequests") {
+        sendResponse({ requests });
     }
 
-    let capturedData = [];
+    if (msg.action === "placePin") {
+        const { lat, lng } = msg;
+        try {
+            const mapEl = document.querySelector(".guess-map_canvas, .guess-map");
+            if (!mapEl || !window.map) {
+                console.warn("Geoguessr map not found");
+                return;
+            }
 
-    window.addEventListener("message", (event) => {
-        if (event.source !== window) return;
-        const msg = event.data;
-        if (!msg || typeof msg !== "object") return;
-        if (msg.source !== "geo-sniffer" || msg.type !== "GEO_META") return;
+            // Convert lat/lng to container pixel point
+            const point = window.map.latLngToContainerPoint([lat, lng]);
 
-        const item = {
-            url: msg.payload?.url || "",
-            method: msg.payload?.method || "GET",
-            response: msg.payload?.response || "",
-            status: msg.payload?.status ?? 0,
-            timestamp: msg.payload?.timestamp || Date.now(),
-            hookType: msg.payload?.hookType || "unknown"
-        };
-        capturedData.push(item);
-    });
-
-    chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-        if (request && request.action === "getMetadataRequests") {
-            sendResponse({
-                requests: capturedData.slice(),
-                url: window.location.href,
-                timestamp: new Date().toLocaleString("da-DK")
+            const evt = new MouseEvent("click", {
+                bubbles: true,
+                cancelable: true,
+                clientX: point.x,
+                clientY: point.y,
+                view: window
             });
-            return true;
+
+            mapEl.dispatchEvent(evt);
+            console.log("Pin placed at", lat, lng);
+        } catch (err) {
+            console.error("Failed to place pin:", err);
         }
-        if (request && request.action === "clearMetadataRequests") {
-            capturedData = [];
-            sendResponse({ success: true });
-            return true;
-        }
-    });
-})();
+    }
+});
+
+function interceptXhr() {
+    const origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (...args) {
+        this.addEventListener("load", function () {
+            try {
+                requests.push({ url: args[1], response: this.responseText });
+                if (requests.length > 50) requests.shift();
+            } catch (_) { }
+        });
+        origOpen.apply(this, args);
+    };
+}
+interceptXhr();

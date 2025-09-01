@@ -140,7 +140,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
                             result.place = candidate.place;
                             result.lang = candidate.lang;
                         }
-                        // Find coordinates (DEP)
+                        // Find coordinates
                         const coords = findCoordinates(data);
                         if (coords) {
                             result.lat = coords.lat;
