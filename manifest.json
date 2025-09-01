@@ -1,0 +1,23 @@
+{
+    "name": "Geolocation Finder",
+    "description": "This is a Chrome extension that intercepts and extracts location metadata from Google Maps services.",
+    "version": "1.1.0",
+    "manifest_version": 3,
+    "permissions": [
+        "debugger",
+        "storage",
+        "tabs",
+        "activeTab"
+    ],
+    "host_permissions": [
+        "*://maps.googleapis.com/*",
+        "*://*.google.com/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Geolocation Finder"
+    }
+}
