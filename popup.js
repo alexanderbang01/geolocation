@@ -222,7 +222,7 @@ function buildStaticMapURL(lat, lng, wrap) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.max(300, Math.round((wrap?.clientWidth || 320) * dpr));
   const h = Math.max(220, Math.round((wrap?.clientHeight || 300) * dpr));
-  const z = 12;
+  const z = 5; // zoomed out more (was 12)
   return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${z}&size=${w}x${h}&markers=${lat},${lng},red-pushpin`;
 }
 
@@ -250,7 +250,7 @@ function renderMap() {
     empty.style.display = "none";
     img.style.display = "none";
 
-    const url = `https://www.google.com/maps?q=${lat},${lng}&z=12&hl=da&output=embed`;
+    const url = `https://www.google.com/maps?q=${lat},${lng}&z=5&hl=da&output=embed`; // zoom=5
     frame.src = url;
     frame.onload = () => {
       loaded = true;
@@ -282,16 +282,30 @@ function renderMap() {
 function initTabs() {
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
+      const tabName = btn.dataset.tab;
+
       document
         .querySelectorAll(".tab")
         .forEach((b) => b.classList.remove("active"));
       document
         .querySelectorAll(".tab-content")
         .forEach((c) => c.classList.remove("active"));
+
       btn.classList.add("active");
-      document.getElementById(btn.dataset.tab).classList.add("active");
-      if (btn.dataset.tab === "maps") renderMap();
+      document.getElementById(tabName).classList.add("active");
+
+      chrome.storage.local.set({ lastActiveTab: tabName });
+
+      if (tabName === "maps") renderMap();
     });
+  });
+
+  // restore last active tab
+  chrome.storage.local.get("lastActiveTab", ({ lastActiveTab }) => {
+    if (lastActiveTab) {
+      const btn = document.querySelector(`.tab[data-tab="${lastActiveTab}"]`);
+      if (btn) btn.click();
+    }
   });
 }
 
