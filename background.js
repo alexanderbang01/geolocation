@@ -51,7 +51,6 @@ function findPlaceCandidate(node, prefs = ["en", "da", "es"]) {
     return best && { place: best.text, lang: best.lang };
 }
 
-// 🆕 Hjælpefunktion til at finde koordinater i response
 function findCoordinates(node) {
     let lat = null, lng = null;
     function scan(n) {
@@ -141,7 +140,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
                             result.place = candidate.place;
                             result.lang = candidate.lang;
                         }
-                        // 🆕 find koordinater
+                        // Find coordinates (DEP)
                         const coords = findCoordinates(data);
                         if (coords) {
                             result.lat = coords.lat;

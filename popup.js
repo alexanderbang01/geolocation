@@ -5,18 +5,101 @@ function fmtTime(ms) {
   return new Date(ms).toLocaleString();
 }
 
-function setStatus(active) {
+function setStatus(text, color = "var(--muted)") {
   const el = $("#status");
-  if (active) {
-    el.textContent = "Capturing";
-    el.style.color = "#22c55e";
-  } else {
-    el.textContent = "Idle";
-    el.style.color = "var(--muted)";
-  }
+  el.textContent = text;
+  el.style.color = color;
 }
 
-// ---- Land + flag ----
+function stripJSONP(text) {
+  if (!text) return "";
+  const first = text.indexOf("(");
+  const last = text.lastIndexOf(")");
+  if (first !== -1 && last !== -1 && last > first) return text.slice(first + 1, last);
+  return text;
+}
+
+function safeParsePayload(text) {
+  let payloadText = stripJSONP(text);
+  let data = null;
+  try {
+    data = JSON.parse(payloadText);
+  } catch (_) {
+    const firstBracket = payloadText.indexOf("[");
+    const lastBracket = payloadText.lastIndexOf("]");
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+      try {
+        data = JSON.parse(payloadText.slice(firstBracket, lastBracket + 1));
+      } catch (_) { }
+    }
+  }
+  return data;
+}
+
+function findPlaceCandidate(node, prefs = ["en", "da", "es"]) {
+  let best = null;
+  function scan(n) {
+    if (Array.isArray(n)) {
+      if (
+        n.length >= 2 &&
+        typeof n[0] === "string" &&
+        typeof n[1] === "string" &&
+        n[1].length <= 5
+      ) {
+        const text = n[0].trim();
+        const lang = n[1].toLowerCase();
+        const looksLikePlace = /,|\s/.test(text) && !/^©|\(c\)|google/i.test(text) && text.length >= 3;
+        if (looksLikePlace) {
+          const score = (prefs.indexOf(lang) + 1) || 999;
+          const lenPenalty = Math.abs(30 - text.length) / 30;
+          const s = score + lenPenalty;
+          if (!best || s < best._score) best = { text, lang, _score: s };
+        }
+      }
+      for (const x of n) scan(x);
+    } else if (typeof n === "object" && n !== null) {
+      for (const k in n) scan(n[k]);
+    }
+  }
+  scan(node);
+  return best && { place: best.text, lang: best.lang };
+}
+
+function findCoordinates(node) {
+  let lat = null, lng = null;
+  function scan(n) {
+    if (Array.isArray(n)) {
+      if (n.length >= 4 && typeof n[2] === "number" && typeof n[3] === "number") {
+        lat = n[2];
+        lng = n[3];
+      }
+      for (const x of n) scan(x);
+    } else if (typeof n === "object" && n !== null) {
+      for (const k in n) scan(n[k]);
+    }
+  }
+  scan(node);
+  return (lat != null && lng != null) ? { lat, lng } : null;
+}
+
+function parseGeoResponse(rawText) {
+  const data = safeParsePayload(rawText);
+  const result = { ok: !!data, data };
+  if (data) {
+    const cand = findPlaceCandidate(data);
+    if (cand) {
+      result.place = cand.place;
+      result.lang = cand.lang;
+    }
+    const coords = findCoordinates(data);
+    if (coords) {
+      result.lat = coords.lat;
+      result.lng = coords.lng;
+    }
+  }
+  return result;
+}
+
 function updateCountry(lat, lng) {
   fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=3&addressdetails=1`)
     .then(res => res.json())
@@ -47,7 +130,7 @@ function refreshUI(data) {
   $("#src").textContent = data?.src || "–";
   $("#when").textContent = fmtTime(data?.when);
 
-  if (data?.lat && data?.lng) {
+  if (data?.lat != null && data?.lng != null) {
     updateCountry(data.lat, data.lng);
   } else {
     $("#country").textContent = "–";
@@ -66,7 +149,7 @@ function loadLast(cb) {
 
 function openInMaps() {
   chrome.storage.local.get("lastGeoMeta", ({ lastGeoMeta }) => {
-    if (lastGeoMeta?.lat && lastGeoMeta?.lng) {
+    if (lastGeoMeta?.lat != null && lastGeoMeta?.lng != null) {
       chrome.tabs.create({
         url: `https://www.google.com/maps/search/?api=1&query=${lastGeoMeta.lat},${lastGeoMeta.lng}`
       });
@@ -78,7 +161,7 @@ function openInMaps() {
   });
 }
 
-// ---- MAPS TAB ----
+// MAPS TAB
 function buildStaticMapURL(lat, lng, wrap) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.max(300, Math.round((wrap?.clientWidth || 320) * dpr));
@@ -138,7 +221,7 @@ function renderMap() {
   });
 }
 
-// ---- Tabs ----
+// Tabs
 function initTabs() {
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -151,39 +234,53 @@ function initTabs() {
   });
 }
 
-// ---- Wire UI ----
+// Wire UI
 function wire() {
   $("#openMaps").addEventListener("click", openInMaps);
-
-  // Toggle capture
-  $("#toggleCapture").addEventListener("click", (e) => {
-    const btn = e.target;
-    if (btn.dataset.active === "true") {
-      chrome.runtime.sendMessage({ cmd: "stop" }, () => {
-        btn.textContent = "Start capture";
-        btn.dataset.active = "false";
-        setStatus(false);
-      });
-    } else {
-      chrome.runtime.sendMessage({ cmd: "start" }, (res) => {
-        if (res?.ok) {
-          btn.textContent = "Stop capture";
-          btn.dataset.active = "true";
-          setStatus(true);
+  $("#fetchBtn").addEventListener("click", () => {
+    setStatus("Henter...", "#fbbf24");
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs && tabs[0] && tabs[0].id;
+      if (!tabId) {
+        setStatus("Ingen faneblad", "#ef4444");
+        return;
+      }
+      chrome.tabs.sendMessage(tabId, { action: "getMetadataRequests" }, (res) => {
+        if (!res || !Array.isArray(res.requests) || res.requests.length === 0) {
+          setStatus("Ingen data", "#ef4444");
+          return;
         }
-      });
-    }
-  });
+        const last = [...res.requests].reverse().find(x =>
+          /GetMetadata|GeoPhotoService/i.test(x.url) && typeof x.response === "string"
+        ) || res.requests[res.requests.length - 1];
 
-  // Reset knap
-  $("#resetBtn").addEventListener("click", () => {
-    chrome.storage.local.remove("lastGeoMeta", () => {
-      refreshUI(null);
+        const parsed = parseGeoResponse(last.response || "");
+        const record = {
+          ok: parsed.ok,
+          when: Date.now(),
+          src: last.url || "–",
+          place: parsed.place,
+          lang: parsed.lang,
+          lat: parsed.lat,
+          lng: parsed.lng,
+          rawPreview: (last.response || "").slice(0, 2000),
+          data: parsed.data
+        };
+
+        chrome.storage.local.set({ lastGeoMeta: record }, () => {
+          loadLast();
+          setStatus(record.ok ? "OK" : "Ukendt format", record.ok ? "#22c55e" : "#f59e0b");
+        });
+      });
     });
   });
 
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === "geo:update") loadLast();
+  // Reset btn
+  $("#resetBtn").addEventListener("click", () => {
+    chrome.storage.local.remove("lastGeoMeta", () => {
+      refreshUI(null);
+      setStatus("Idle");
+    });
   });
 
   loadLast();
