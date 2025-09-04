@@ -113,7 +113,7 @@ const dotIntervals = {};
 
 function startDots(el) {
   if (!el) return;
-  stopDots(el); // sikrer ingen dobbelt
+  stopDots(el); // prevent double
   let dots = 0;
   dotIntervals[el.id] = setInterval(() => {
     dots = (dots + 1) % 4;
@@ -146,7 +146,7 @@ function updateCountry(lat, lng) {
   )
     .then((res) => res.json())
     .then((data) => {
-      const country = data?.address?.country || "Ukendt";
+      const country = data?.address?.country || "Unknown";
       const code = data?.address?.country_code?.toLowerCase();
 
       stopDots(countryEl, country);
@@ -162,18 +162,31 @@ function updateCountry(lat, lng) {
       }
     })
     .catch(() => {
-      stopDots(countryEl, "Ukendt");
+      stopDots(countryEl, "Unknown");
       flagEl.style.display = "none";
       stopDots(flagTextEl, "–");
     });
 }
 
+// ---- Place fallback (forced English) ----
+function fillPlaceFromCoords(lat, lng) {
+  const placeEl = $("#place");
+  startDots(placeEl);
+  return fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1&accept-language=en`)
+    .then((res) => res.json())
+    .then((geo) => {
+      const a = geo?.address || {};
+      const display =
+        a.city || a.town || a.village || a.municipality || a.suburb ||
+        a.county || a.state || geo?.display_name || "Unknown location";
+      stopDots(placeEl, display);
+    })
+    .catch(() => stopDots(placeEl, "–"));
+}
+
 function refreshUI(data) {
-  // stop dots først
   ["place", "country", "lat", "lng", "src", "when", "flagText"].forEach(
-    (id) => {
-      stopDots($(`#${id}`));
-    }
+    (id) => stopDots($(`#${id}`))
   );
 
   $("#place").textContent = data?.place || "–";
@@ -184,6 +197,12 @@ function refreshUI(data) {
 
   if (data?.lat != null && data?.lng != null) {
     updateCountry(data.lat, data.lng);
+
+    // fallback only if place is missing or copyright
+    const badPlace = !data.place || /images may be subject to copyright/i.test(data.place);
+    if (badPlace) {
+      fillPlaceFromCoords(data.lat, data.lng);
+    }
   } else {
     $("#country").textContent = "–";
     $("#flag").style.display = "none";
@@ -222,7 +241,7 @@ function buildStaticMapURL(lat, lng, wrap) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.max(300, Math.round((wrap?.clientWidth || 320) * dpr));
   const h = Math.max(220, Math.round((wrap?.clientHeight || 300) * dpr));
-  const z = 5; // zoomed out more (was 12)
+  const z = 5;
   return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${z}&size=${w}x${h}&markers=${lat},${lng},red-pushpin`;
 }
 
@@ -250,7 +269,7 @@ function renderMap() {
     empty.style.display = "none";
     img.style.display = "none";
 
-    const url = `https://www.google.com/maps?q=${lat},${lng}&z=5&hl=da&output=embed`; // zoom=5
+    const url = `https://www.google.com/maps?q=${lat},${lng}&z=5&hl=da&output=embed`;
     frame.src = url;
     frame.onload = () => {
       loaded = true;
@@ -269,7 +288,7 @@ function renderMap() {
       };
       img.onerror = () => {
         img.style.display = "none";
-        empty.textContent = "Kunne ikke hente kortet.";
+        empty.textContent = "Could not fetch map.";
         empty.style.display = "block";
       };
     }, 1200);
@@ -300,7 +319,6 @@ function initTabs() {
     });
   });
 
-  // restore last active tab
   chrome.storage.local.get("lastActiveTab", ({ lastActiveTab }) => {
     if (lastActiveTab) {
       const btn = document.querySelector(`.tab[data-tab="${lastActiveTab}"]`);
@@ -314,9 +332,8 @@ function wire() {
   $("#openMaps").addEventListener("click", openInMaps);
 
   $("#fetchBtn").addEventListener("click", () => {
-    setStatus("Henter...", "#fbbf24");
+    setStatus("Fetching...", "#fbbf24");
 
-    // Start prikker på alle felter
     ["place", "country", "lat", "lng", "src", "when", "flagText"].forEach(
       (id) => {
         const el = $(`#${id}`);
@@ -329,7 +346,7 @@ function wire() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabId = tabs && tabs[0] && tabs[0].id;
       if (!tabId) {
-        setStatus("Ingen faneblad", "#ef4444");
+        setStatus("No tab", "#ef4444");
         return;
       }
       chrome.tabs.sendMessage(
@@ -365,7 +382,7 @@ function wire() {
           chrome.storage.local.set({ lastGeoMeta: record }, () => {
             loadLast();
             setStatus(
-              record.ok ? "OK" : "Ukendt format",
+              record.ok ? "OK" : "Unknown format",
               record.ok ? "#22c55e" : "#f59e0b"
             );
           });
@@ -376,11 +393,8 @@ function wire() {
 
   $("#resetBtn").addEventListener("click", () => {
     chrome.storage.local.remove("lastGeoMeta", () => {
-      // stop prikker og sæt tilbage til bindestreg
       ["place", "country", "lat", "lng", "src", "when", "flagText"].forEach(
-        (id) => {
-          stopDots($(`#${id}`), "–");
-        }
+        (id) => stopDots($(`#${id}`), "–")
       );
       $("#flag").style.display = "none";
       $("#flagText").style.display = "block";
